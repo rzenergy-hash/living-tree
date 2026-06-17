@@ -1,0 +1,171 @@
+/*
+  Living Tree — styles
+  --------------------
+  The page is a calm, gallery-like frame for the artwork. The canvases are
+  absolutely stacked and centered; the panel floats quietly until summoned.
+*/
+
+:root {
+  --bg: #f4f1ea;          /* warm paper tone behind the painting   */
+  --ink: #3a3a36;         /* muted ink for UI text                 */
+  --panel-bg: rgba(244, 241, 234, 0.86);
+  --panel-line: rgba(58, 58, 54, 0.18);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  overflow: hidden;          /* the artwork owns the whole viewport */
+  cursor: crosshair;
+}
+
+/* The stage holds all four stacked canvas layers. */
+#stage {
+  position: fixed;
+  inset: 0;
+  display: block;
+}
+
+.layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  /* layers are positioned/scaled in JS via the device-pixel canvas size */
+}
+
+/* ---- Hidden controls -------------------------------------------------- */
+
+#panel-toggle {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(58, 58, 54, 0.28);
+  cursor: pointer;
+  z-index: 20;
+  transition: background 0.4s ease, transform 0.4s ease;
+}
+#panel-toggle:hover { background: rgba(58, 58, 54, 0.6); transform: scale(1.25); }
+
+#panel {
+  position: fixed;
+  left: 18px;
+  bottom: 44px;
+  width: 248px;
+  padding: 18px 20px 14px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+  z-index: 21;
+  transition: opacity 0.45s ease, transform 0.45s ease;
+}
+#panel.hidden {
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
+}
+
+#panel h1 {
+  margin: 0 0 2px;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+#panel .hint { margin: 0 0 14px; font-size: 12.5px; opacity: 0.7; font-style: italic; }
+
+#panel label {
+  display: block;
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  opacity: 0.78;
+  margin-bottom: 12px;
+}
+
+#panel input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 3px;
+  margin-top: 7px;
+  border-radius: 3px;
+  background: rgba(58, 58, 54, 0.25);
+  outline: none;
+}
+#panel input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: #6b7a4f;          /* sage-olive accent */
+  cursor: pointer;
+  border: 2px solid var(--bg);
+}
+#panel input[type="range"]::-moz-range-thumb {
+  width: 14px; height: 14px; border: 2px solid var(--bg);
+  border-radius: 50%; background: #6b7a4f; cursor: pointer;
+}
+
+#panel .row { display: flex; gap: 8px; margin-top: 4px; }
+#panel button {
+  flex: 1;
+  font: inherit;
+  font-size: 12px;
+  padding: 8px 6px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--panel-line);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.25s ease;
+}
+#panel button:hover { background: rgba(107, 122, 79, 0.18); }
+#panel button.active { background: rgba(107, 122, 79, 0.35); border-color: #6b7a4f; }
+
+#panel .credit {
+  margin: 14px 0 0;
+  font-size: 11px;
+  opacity: 0.55;
+}
+#panel kbd {
+  font-family: ui-monospace, monospace;
+  background: rgba(58, 58, 54, 0.12);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+#panel code, #missing code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.92em;
+}
+
+/* ---- Missing image notice -------------------------------------------- */
+#missing {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 6px;
+  z-index: 30;
+  background: var(--bg);
+}
+#missing p { margin: 0; max-width: 420px; line-height: 1.5; }
+
+.hidden { display: none !important; }
+/* panel uses opacity-based hide, so override the generic .hidden for it */
+#panel.hidden { display: block !important; }

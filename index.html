@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Living Tree — an interactive generative artwork</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!--
+    Living Tree
+    ===========
+    A poetic, interactive generative artwork.
+
+    The base painting (tree.png) is preserved untouched as the deepest layer.
+    Everything else — leaves, particles, fog, energy traces — is drawn on
+    canvases stacked ON TOP of the image. The original art is never modified.
+
+    Layer stack (back -> front):
+      1. #bg-canvas        the base painting (parallax)
+      2. #leaf-canvas      generated leaves growing on branch pixels
+      3. #particle-canvas  drifting dust + ambient particles
+      4. #fog-canvas       soft mist + energy traces near the cursor
+  -->
+
+  <div id="stage">
+    <canvas id="bg-canvas"       class="layer"></canvas>
+    <canvas id="leaf-canvas"     class="layer"></canvas>
+    <canvas id="particle-canvas" class="layer"></canvas>
+    <canvas id="fog-canvas"      class="layer"></canvas>
+  </div>
+
+  <!-- Hidden control panel. Toggle with the "C" key or the small dot, lower-left. -->
+  <button id="panel-toggle" aria-label="Toggle controls" title="Controls (C)"></button>
+
+  <aside id="panel" class="hidden" aria-hidden="true">
+    <h1>Living Tree</h1>
+    <p class="hint">Move near the branches to awaken the tree.</p>
+
+    <label>
+      Growth Sensitivity
+      <input id="growthSens" type="range" min="0.3" max="2.5" step="0.05" value="1" />
+    </label>
+
+    <label>
+      Audio Sensitivity
+      <input id="audioSens" type="range" min="0" max="3" step="0.05" value="1" />
+    </label>
+
+    <label>
+      Wind Strength
+      <input id="windStr" type="range" min="0" max="3" step="0.05" value="1" />
+    </label>
+
+    <div class="row">
+      <button id="soundBtn" type="button">Ambient Sound</button>
+    </div>
+
+    <div class="row">
+      <button id="micBtn" type="button">Enable Microphone</button>
+    </div>
+
+    <div class="row">
+      <button id="resetBtn" type="button">Reset Tree</button>
+      <button id="saveBtn"  type="button">Save PNG</button>
+    </div>
+
+    <p class="credit">Press <kbd>C</kbd> to hide · base image: <code>tree.png</code></p>
+  </aside>
+
+  <!-- Shown if tree.png is missing. -->
+  <div id="missing" class="hidden">
+    <p><strong>tree.png not found.</strong></p>
+    <p>Drop your image into this folder and name it <code>tree.png</code>, then refresh.</p>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
