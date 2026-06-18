@@ -44,8 +44,10 @@
     maxLeaves:        2400,   // dense enough to also coat the thin twigs
     darkThreshold:    185,    // catches faint twigs; edge test below rejects smudges
     topBias:          1.1,    // gentler bias so leaves spread onto small branches everywhere
-    growthRadiusMove: 160,    // px: small radius while the mouse is moving
-    growthRadiusStay: 270,    // px: grows to this as the mouse rests in place
+    // Growth radius as a FRACTION of the displayed tree's short side, so it
+    // covers the same proportion of the artwork on any screen size.
+    growthRadiusMoveFrac: 0.22,   // while the mouse is moving
+    growthRadiusStayFrac: 0.375,  // grows to this as the mouse rests in place
     growthEase:       0.05,   // slow, gentle growth toward each leaf's target
     decayEase:        0.04,   // slower fade-out for a graceful return to dormancy
     detachChance:     0.01,   // per-frame chance a decaying full leaf detaches & falls
@@ -677,7 +679,11 @@
     // --- Leaves: the growth radius shrinks while moving, grows while still ---
     // Moving the mouse -> ~160px; resting in place gradually grows it to ~270px
     // (dwell rises while still, falls while moving).
-    const fillR = lerp(CONFIG.growthRadiusMove, CONFIG.growthRadiusStay, dwell) * settings.growthSens;
+    // Scale the radius to the displayed tree (its short side), falling back to
+    // the viewport if the image hasn't loaded yet. Keeps the same proportion at
+    // any screen size and updates live on resize.
+    const ref = fit.h ? Math.min(fit.w, fit.h) : Math.min(viewW, viewH);
+    const fillR = lerp(CONFIG.growthRadiusMoveFrac, CONFIG.growthRadiusStayFrac, dwell) * ref * settings.growthSens;
     const soft = fillR * 0.28;                  // soft fade at the edge of the bloom
     for (const lf of leaves) {
       let target = 0;
