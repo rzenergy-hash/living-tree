@@ -282,7 +282,9 @@
       nx, ny,                                     // normalized 0..1 position on image
       growth: 0,                                  // current 0..1
       target: 0,                                  // desired 0..1
-      size: Math.random() < 0.2 ? rand(20, 32) : rand(11, 22),  // overall twig length (px)
+      // overall twig length in REFERENCE px (multiplied by treeScale at draw
+      // time so leaves scale with the displayed tree). Bumped up for more cover.
+      size: Math.random() < 0.25 ? rand(26, 44) : rand(15, 28),
       bend: rand(-1, 1),                          // gentle curve of the twig
       leaflets,
       angle: rand(-0.5, 0.5) + (Math.random() < 0.5 ? 0 : Math.PI),  // mostly up/down
@@ -693,8 +695,8 @@
     // flowers fade; the leaves then refill at the new spot and, once full, the
     // flowers bloom there. So flowers always follow where you settle.
     const moving = mouse.speed > 6;
-    const leavesFull = mouse.inside && !moving && dwell > 0.8;
-    bloom = clamp(bloom + (leavesFull ? dt * 0.12 : -dt * (moving ? 1.6 : 0.5)), 0, 1);
+    const leavesFull = mouse.inside && !moving && dwell > 0.7;   // flowers start a touch sooner
+    bloom = clamp(bloom + (leavesFull ? dt * 0.16 : -dt * (moving ? 1.6 : 0.5)), 0, 1);
 
     // --- Leaves: the growth radius shrinks while moving, grows while still ---
     // Moving the mouse -> ~160px; resting in place gradually grows it to ~270px
@@ -927,6 +929,9 @@
     leafCtx.clearRect(0, 0, viewW, viewH);
     const p = parallax(CONFIG.parallax.leaf);
     const breath = 0.5 + 0.5 * Math.sin(time * 0.8);       // canopy breathing 0..1
+    // Scale leaves/flowers to the displayed tree so coverage looks the same at
+    // any window size (sizes are authored relative to a 720px-short-side tree).
+    const treeScale = (fit.h ? Math.min(fit.w, fit.h) : Math.min(viewW, viewH)) / 720;
 
     for (const lf of leaves) {
       if (lf.growth < 0.02) continue;
@@ -937,7 +942,7 @@
 
       // Growth maps to the sprig's overall scale (bud -> young -> full sprig).
       const scale = lerp(0.16, 1, g);
-      const len = lf.size * scale;
+      const len = lf.size * scale * treeScale;
 
       // Flutter: ambient breeze always, stronger with wind + audio + fast mouse.
       const fl = Math.sin(time * lf.flutterSpd * 2 + lf.flutter);
@@ -956,7 +961,7 @@
       leafCtx.restore();
 
       // White flower on top of the foliage (opens after the leaves fill).
-      if (lf.flower > 0.02) drawFlower(sx + lf.foffx * scale, sy + lf.foffy * scale, lf);
+      if (lf.flower > 0.02) drawFlower(sx + lf.foffx * scale * treeScale, sy + lf.foffy * scale * treeScale, lf, treeScale);
     }
 
     // Detached, falling leaves.
@@ -973,11 +978,11 @@
 
   // A small white flower: a ring of petals around a golden centre, with a faint
   // soft shadow so the white reads against pale paper. Scales open with `flower`.
-  function drawFlower(x, y, lf) {
+  function drawFlower(x, y, lf, treeScale = 1) {
     const ctx = leafCtx;
     const f = lf.flower;
     const pulse = 1 + 0.05 * Math.sin(time * 1.5 + lf.flowerPhase);
-    const rr = lf.flowerSize * (0.4 + 0.6 * f) * pulse;   // petal-ring radius
+    const rr = lf.flowerSize * (0.4 + 0.6 * f) * pulse * treeScale;   // petal-ring radius
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(lf.flowerPhase);
