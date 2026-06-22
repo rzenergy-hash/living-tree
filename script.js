@@ -112,7 +112,10 @@
   let micActive = false;
 
   // Audio — synthesized ambient soundscape (background sound output)
-  let soundOn = false;
+  // Defaults to ON, but browsers won't let audio play until the first user
+  // gesture, so it actually starts on the first click/key/tap (see boot).
+  let soundOn = true;
+  let soundStarted = false;
   let soundCtx = null;
   let soundNodes = null;
 
@@ -589,12 +592,23 @@
     }
   }
 
+  // Start the soundscape if it's armed-on but hasn't begun yet. Safe to call
+  // from any user gesture; does nothing once already started or if turned off.
+  function ensureSound() {
+    if (!soundOn || soundStarted) return;
+    startSound();
+    soundStarted = true;
+    const btn = document.getElementById('soundBtn');
+    if (btn) { btn.textContent = 'Sound On'; btn.classList.add('active'); }
+  }
+
   function toggleSound() {
     const btn = document.getElementById('soundBtn');
     if (!soundOn) {
+      soundOn = true;
       if (!soundCtx) startSound();
       else { soundCtx.resume(); soundNodes.master.gain.setTargetAtTime(0.6, soundCtx.currentTime, 1.5); }
-      soundOn = true;
+      soundStarted = true;
       btn.textContent = 'Sound On'; btn.classList.add('active');
     } else {
       if (soundNodes) soundNodes.master.gain.setTargetAtTime(0.0001, soundCtx.currentTime, 0.8);
@@ -1153,7 +1167,11 @@
     bind('audioSens',  'audioSens');   // scales perceived loudness below
     bind('windStr',    'windStr');
 
-    document.getElementById('soundBtn').addEventListener('click', toggleSound);
+    // First click on the button starts the (armed-on) sound; later clicks toggle.
+    document.getElementById('soundBtn').addEventListener('click', () => {
+      if (soundOn && !soundStarted) ensureSound();
+      else toggleSound();
+    });
     document.getElementById('micBtn').addEventListener('click', enableMic);
 
     document.getElementById('resetBtn').addEventListener('click', () => {
@@ -1200,4 +1218,25 @@
   loadImage();
   loadButterfly();
   requestAnimationFrame(frame);
+
+  // Ambient sound is ON by default. Browsers block audio until a user gesture,
+  // so reflect the armed state on the button and start the soundscape on the
+  // first click/key/tap anywhere (gestures that don't target the sound button,
+  // which manages its own start/toggle).
+  {
+    const sb = document.getElementById('soundBtn');
+    if (sb) { sb.textContent = 'Sound On'; sb.classList.add('active'); }
+    const starter = (e) => {
+      if (e.target && e.target.id === 'soundBtn') return;   // button handles itself
+      ensureSound();
+      if (soundStarted) {
+        window.removeEventListener('pointerdown', starter);
+        window.removeEventListener('keydown', starter);
+        window.removeEventListener('touchstart', starter);
+      }
+    };
+    window.addEventListener('pointerdown', starter);
+    window.addEventListener('keydown', starter);
+    window.addEventListener('touchstart', starter);
+  }
 })();
