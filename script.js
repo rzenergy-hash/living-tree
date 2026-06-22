@@ -41,9 +41,11 @@
   const IMAGE_SRC = 'tree.png';   // <-- replace this file to use your own art
 
   const CONFIG = {
-    maxLeaves:        3300,   // biased onto thin twigs and tips (see sampling)
+    maxLeaves:        4500,   // cap on individual leaves (placed in clusters)
     darkThreshold:    185,    // catches faint twigs; edge test below rejects smudges
-    topBias:          1.1,    // gentler bias so leaves spread onto small branches everywhere
+    topBias:          1.05,   // gentle bias toward the upper canopy when seeding
+    clusterMin:       3,      // leaves in a small cluster
+    clusterMax:       12,     // leaves in a medium cluster
     // Growth radius as a FRACTION of the displayed tree's short side, so it
     // covers the same proportion of the artwork on any screen size.
     growthRadiusMoveFrac: 0.22,   // while the mouse is moving
@@ -56,15 +58,19 @@
     fogBlobs:         13,     // rising smoke clouds
     wisps:            7,      // drifting air-current bands
     butterflies:      3,      // butterflies fluttering around the cursor while hovering
+    spriteVariants:   18,     // distinct leaf silhouettes in the pre-rendered library
+    spriteColorsEach: 4,      // colour variations rendered per silhouette
   };
 
-  // Lush leaf palette tuned to the reference: olive + yellow-green + golden glints.
+  // Leaf palette: sage, olive, yellow-green, with the occasional muted golden.
+  // `w` is the relative chance of a leaf taking that colour (golden is rare).
   const PALETTE = [
-    { h: 74,  s: 52, l: 41 },  // olive
-    { h: 64,  s: 60, l: 45 },  // yellow-green
-    { h: 84,  s: 46, l: 40 },  // sage-olive
-    { h: 56,  s: 62, l: 48 },  // bright yellow-green
-    { h: 48,  s: 74, l: 53 },  // golden highlight (rare)
+    { h: 88,  s: 30, l: 47, w: 1.0 },  // sage green
+    { h: 78,  s: 42, l: 42, w: 1.0 },  // olive
+    { h: 68,  s: 50, l: 47, w: 1.0 },  // yellow-green
+    { h: 60,  s: 55, l: 50, w: 0.8 },  // brighter yellow-green
+    { h: 96,  s: 24, l: 50, w: 0.7 },  // dusty sage
+    { h: 47,  s: 60, l: 54, w: 0.18 }, // muted golden (occasional)
   ];
 
   // ---- Canvas / layer setup ------------------------------------------
@@ -88,13 +94,17 @@
   let img = null;
   let fit = { x: 0, y: 0, w: 0, h: 0 };     // destination rect of the image (CSS px)
 
-  let leaves = [];                          // anchor objects
+  let leaves = [];                          // individual leaf objects (placed in clusters)
   let fallers = [];                         // detached, falling leaves
   let particles = [];                       // ambient dust
   let fogs = [];                            // soft mist blobs
   let wisps = [];                           // drifting horizontal air currents
   let butterfliesV = [];                    // butterflies that flutter around while hovering
   let butterflySprite = null;               // preprocessed butterfly.png (alpha-keyed), or null
+
+  // Pre-rendered art (built once, reused every frame for performance).
+  let leafSprites = [];                     // [{canvas, ar}] varied leaf silhouettes + colours
+  let flowerSprite = null;                  // cached white flower
 
   // Pointer + motion
   const mouse = { x: -9999, y: -9999, px: -9999, py: -9999, inside: false, speed: 0 };
@@ -126,6 +136,136 @@
   const rand  = (a, b) => a + Math.random() * (b - a);
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const lerp  = (a, b, t) => a + (b - a) * t;
+  const randi = (n) => Math.floor(Math.random() * n);
+
+  // Pick a palette colour by weight (golden is rare).
+  function pickPalette() {
+    let total = 0;
+    for (const c of PALETTE) total += c.w;
+    let r = Math.random() * total;
+    for (const c of PALETTE) { r -= c.w; if (r <= 0) return c; }
+    return PALETTE[0];
+  }
+
+  // ---- Leaf sprite library (pre-rendered once, reused every frame) ----
+  /*
+    Each sprite is a small offscreen canvas holding ONE leaf silhouette, drawn
+    pointing "up" (base at bottom-centre, tip at top) with a soft watercolour
+    fill — a base colour, a tip-to-base gradient, and a couple of translucent
+    patches. No veins, no shadows, no filters. At draw time we just transform
+    and drawImage the cached canvas, so thousands of leaves stay cheap.
+  */
+  function buildLeafSprites() {
+    leafSprites = [];
+    const SH = 80;                       // sprite render height (px) — downscaled when drawn
+    for (let s = 0; s < CONFIG.spriteVariants; s++) {
+      // silhouette parameters for this variant
+      const shape = {
+        belly:  rand(0.42, 1.0),         // narrow (low) .. rounded (high)
+        curve:  rand(-0.5, 0.5),         // sideways bend
+        tip:    rand(0.25, 0.85),        // tip sharpness (low = pointy)
+        w1: rand(-0.18, 0.18), w2: rand(-0.18, 0.18),   // edge wobble (irregular edges)
+        w3: rand(-0.18, 0.18), w4: rand(-0.18, 0.18),
+        baseW: rand(0.18, 0.4),          // how wide near the stalk
+      };
+      for (let cI = 0; cI < CONFIG.spriteColorsEach; cI++) {
+        const pal = pickPalette();
+        const col = { h: pal.h + rand(-7, 7), s: pal.s + rand(-8, 8), l: pal.l + rand(-7, 9) };
+        leafSprites.push(renderLeafSprite(SH, shape, col));
+      }
+    }
+  }
+
+  // Build the outline path for a leaf into ctx (centred in a W x H box).
+  function leafOutline(ctx, W, H, sh) {
+    const baseX = W / 2, baseY = H - 2;
+    const tipX = W / 2 + sh.curve * W * 0.28, tipY = 2;
+    const midY = baseY * 0.5 + tipY * 0.5;
+    const half = (W / 2 - 1) * sh.belly;
+    ctx.beginPath();
+    ctx.moveTo(baseX, baseY);
+    // right edge: stalk -> belly -> tip
+    ctx.bezierCurveTo(
+      baseX + half * sh.baseW, baseY - (baseY - midY) * 0.35,
+      baseX + half * (1 + sh.w1), midY + sh.w2 * H * 0.12,
+      tipX, tipY);
+    // left edge: tip -> belly -> stalk
+    ctx.bezierCurveTo(
+      baseX - half * (1 + sh.w3), midY + sh.w4 * H * 0.12,
+      baseX - half * sh.baseW, baseY - (baseY - midY) * 0.35,
+      baseX, baseY);
+    ctx.closePath();
+  }
+
+  function renderLeafSprite(SH, sh, col) {
+    const ar = clamp(sh.belly * 0.72, 0.32, 0.78);   // width / height
+    const W = Math.round(SH * ar), H = SH;
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const x = c.getContext('2d');
+    const hsl  = (h, s, l) => `hsl(${Math.round(h)}, ${Math.round(s)}%, ${Math.round(l)}%)`;
+    const hsla = (h, s, l, a) => `hsla(${Math.round(h)}, ${Math.round(s)}%, ${Math.round(l)}%, ${a})`;
+
+    // soft watercolour fill, clipped to the leaf outline
+    leafOutline(x, W, H, sh);
+    x.save();
+    x.clip();
+    x.fillStyle = hsl(col.h, col.s, col.l);
+    x.fillRect(0, 0, W, H);
+    // tip-to-base gradient (lighter toward the tip)
+    const g = x.createLinearGradient(0, H, 0, 0);
+    g.addColorStop(0, hsla(col.h, col.s, Math.max(18, col.l - 8), 0.5));
+    g.addColorStop(1, hsla(col.h + 6, col.s, Math.min(78, col.l + 14), 0.45));
+    x.fillStyle = g;
+    x.fillRect(0, 0, W, H);
+    // a couple of translucent watercolour patches for texture
+    for (let i = 0; i < 2; i++) {
+      const px = rand(W * 0.25, W * 0.75), py = rand(H * 0.2, H * 0.85), pr = rand(W * 0.2, W * 0.5);
+      const rg = x.createRadialGradient(px, py, 0, px, py, pr);
+      const dl = clamp(i === 0 ? col.l + 16 : col.l - 12, 12, 82);
+      rg.addColorStop(0, hsla(col.h, col.s, dl, 0.28));
+      rg.addColorStop(1, hsla(col.h, col.s, dl, 0));
+      x.fillStyle = rg;
+      x.fillRect(0, 0, W, H);
+    }
+    x.restore();
+
+    // a faint short stalk at the base
+    x.strokeStyle = hsla(col.h, Math.max(12, col.s - 18), Math.max(16, col.l - 24), 0.5);
+    x.lineWidth = Math.max(1, W * 0.05);
+    x.beginPath();
+    x.moveTo(W / 2, H);
+    x.lineTo(W / 2, H - H * 0.14);
+    x.stroke();
+
+    return { canvas: c, ar: W / H };
+  }
+
+  // A cached white flower sprite (petals + golden centre + soft halo).
+  function buildFlowerSprite() {
+    const S = 64, c = document.createElement('canvas');
+    c.width = S; c.height = S;
+    const x = c.getContext('2d');
+    const cx = S / 2, cy = S / 2, petals = 5, R = S * 0.3;
+    // soft halo so the white lifts off pale paper
+    const halo = x.createRadialGradient(cx, cy, 0, cx, cy, S * 0.5);
+    halo.addColorStop(0, 'rgba(90,95,78,0.16)');
+    halo.addColorStop(1, 'rgba(90,95,78,0)');
+    x.fillStyle = halo; x.fillRect(0, 0, S, S);
+    // petals
+    for (let i = 0; i < petals; i++) {
+      const a = (i / petals) * Math.PI * 2;
+      const px = cx + Math.cos(a) * R, py = cy + Math.sin(a) * R;
+      x.fillStyle = 'rgba(255,255,255,0.97)';
+      x.beginPath();
+      x.ellipse(px, py, R * 0.66, R * 0.42, a, 0, Math.PI * 2);
+      x.fill();
+    }
+    // golden centre
+    x.fillStyle = 'rgba(243,206,112,0.96)';
+    x.beginPath(); x.arc(cx, cy, R * 0.44, 0, Math.PI * 2); x.fill();
+    flowerSprite = c;
+  }
 
   // ---- Image load + branch detection ---------------------------------
   function loadImage() {
@@ -243,66 +383,92 @@
       }
     }
 
-    // Build leaf anchors from a random subset of candidates.
+    // Estimate the local branch direction at a sample pixel using a small
+    // structure tensor over the surrounding dark pixels. Returns the branch
+    // orientation (radians) and a 0..1 strength (how line-like it is; low at
+    // tips/blobs where there's no clear direction).
+    const WIN = Math.max(3, Math.round(SAMPLE_W / 150));
+    function branchDirAt(px, py) {
+      let jxx = 0, jxy = 0, jyy = 0, n = 0;
+      for (let dy = -WIN; dy <= WIN; dy++) {
+        const yy = py + dy; if (yy < 0 || yy >= SAMPLE_H) continue;
+        for (let dx = -WIN; dx <= WIN; dx++) {
+          const xx = px + dx; if (xx < 0 || xx >= SAMPLE_W) continue;
+          if (lumA[yy * SAMPLE_W + xx] < DARK) { jxx += dx * dx; jxy += dx * dy; jyy += dy * dy; n++; }
+        }
+      }
+      if (n < 3) return { ang: rand(0, Math.PI * 2), strength: 0 };
+      const ang = 0.5 * Math.atan2(2 * jxy, jxx - jyy);        // orientation of elongation
+      const tr = jxx + jyy, det = jxx * jyy - jxy * jxy;
+      const disc = Math.sqrt(Math.max(0, tr * tr / 4 - det));
+      const l1 = tr / 2 + disc, l2 = tr / 2 - disc;
+      const strength = l1 > 0 ? clamp((l1 - l2) / l1, 0, 1) : 0;
+      return { ang, strength };
+    }
+
+    // Place leaves in natural CLUSTERS around chosen seed pixels (favouring the
+    // thin twigs/tips from `candidates`). Each cluster runs a little along the
+    // branch, and its leaves fan OUTWARD to both sides — never straight along it.
     leaves = [];
-    const pairCount = candidates.length / 2;
-    const want = Math.min(CONFIG.maxLeaves, pairCount);
-    for (let n = 0; n < want; n++) {
-      const k = (Math.floor(Math.random() * pairCount)) * 2;
-      const nx = candidates[k] + rand(-0.004, 0.004);   // jitter off the exact pixel
-      const ny = candidates[k + 1] + rand(-0.004, 0.004);
-      leaves.push(makeLeaf(nx, ny));
+    const seedCount = candidates.length / 2;
+    // shuffle seed order so clusters are spread, then consume until the cap
+    const order = [];
+    for (let i = 0; i < seedCount; i++) order.push(i);
+    for (let i = order.length - 1; i > 0; i--) { const j = randi(i + 1); const t = order[i]; order[i] = order[j]; order[j] = t; }
+
+    for (let oi = 0; oi < order.length && leaves.length < CONFIG.maxLeaves; oi++) {
+      const k = order[oi] * 2;
+      const snx = candidates[k], sny = candidates[k + 1];
+      const spx = snx * SAMPLE_W, spy = sny * SAMPLE_H;
+      const dir = branchDirAt(spx | 0, spy | 0);
+      // smaller, tip-like spots get tighter clusters; richer branches get more
+      const size = CONFIG.clusterMin + randi(CONFIG.clusterMax - CONFIG.clusterMin + 1);
+      const along = dir.ang;                       // unit step along the branch
+      const ax = Math.cos(along), ay = Math.sin(along);
+      // Compact clump: a small reach along the branch + a little perpendicular,
+      // so each cluster reads as a tight clump with gaps between clusters.
+      const reach = 0.016 + dir.strength * 0.022;  // normalized cluster radius
+
+      for (let c = 0; c < size && leaves.length < CONFIG.maxLeaves; c++) {
+        const t = rand(-1, 1);
+        const perp = rand(-0.55, 0.55);
+        const nx = clamp(snx + ax * t * reach + (-ay) * perp * reach * 0.7, 0, 1) + rand(-0.0015, 0.0015);
+        const ny = clamp(sny + ay * t * reach + ax * perp * reach * 0.7, 0, 1) + rand(-0.0015, 0.0015);
+        // outward angle: perpendicular to the branch, either side, plus spread.
+        // At tips (low strength) fan in any direction instead.
+        let angle;
+        if (dir.strength < 0.25) {
+          angle = rand(0, Math.PI * 2);
+        } else {
+          const side = Math.random() < 0.5 ? 1 : -1;
+          angle = along + side * (Math.PI / 2) + rand(-0.6, 0.6);   // outward ± ~35°
+        }
+        leaves.push(makeLeaf(nx, ny, angle));
+      }
     }
   }
 
-  // A single leaf anchor — actually a small SPRIG: a thin twig bearing several
-  // tiny leaflets in pairs plus a terminal leaflet, like the reference foliage.
-  // The whole layout is precomputed once so it stays stable frame to frame
-  // (only its overall scale changes as the sprig grows).
-  function makeLeaf(nx, ny) {
-    const pal = PALETTE[Math.random() < 0.08
-      ? 4                                         // rare golden highlight
-      : Math.floor(Math.random() * 4)];
-
-    // Build the leaflets arranged along the twig.
-    const pairs = 3 + Math.floor(Math.random() * 4);   // 3–6 pairs (fuller sprigs)
-    const leaflets = [];
-    for (let i = 1; i <= pairs; i++) {
-      const t = i / (pairs + 1);                       // position along the twig 0..1
-      const splay = rand(0.5, 1.1);                    // outward angle from the twig
-      const ll = rand(0.22, 0.36);                     // leaflet length / twig length
-      // a matched-but-imperfect pair, each leaflet its own organic shape
-      leaflets.push({ t, side: 1,  ang: splay * rand(0.85, 1.15), ll: ll * rand(0.85, 1.15), wd: rand(0.5, 0.82), ty: Math.floor(Math.random() * 4) });
-      leaflets.push({ t, side: -1, ang: splay * rand(0.85, 1.15), ll: ll * rand(0.85, 1.15), wd: rand(0.5, 0.82), ty: Math.floor(Math.random() * 4) });
-    }
-    // terminal leaflet at the tip, pointing along the twig
-    leaflets.push({ t: 1, side: 0, ang: 0, ll: rand(0.26, 0.4), wd: rand(0.55, 0.85), ty: Math.floor(Math.random() * 4) });
-
+  // One individual leaf. Position is normalized image space; `angle` is the
+  // outward growth direction. Sprite/size/motion are all unique per leaf.
+  function makeLeaf(nx, ny, angle) {
+    const big = Math.random() < 0.22;
     return {
-      nx, ny,                                     // normalized 0..1 position on image
-      growth: 0,                                  // current 0..1
-      target: 0,                                  // desired 0..1
-      // overall twig length in REFERENCE px (multiplied by treeScale at draw
-      // time so leaves scale with the displayed tree). Bumped up for more cover.
-      size: Math.random() < 0.25 ? rand(26, 44) : rand(15, 28),
-      bend: rand(-1, 1),                          // gentle curve of the twig
-      leaflets,
-      angle: rand(-0.5, 0.5) + (Math.random() < 0.5 ? 0 : Math.PI),  // mostly up/down
-      flutter: rand(0, Math.PI * 2),              // phase offset for sway/pulse
-      flutterSpd: rand(0.6, 1.4),
-      hue: pal.h + rand(-6, 6),
-      sat: pal.s + rand(-4, 10),
-      lit: pal.l + rand(-6, 8),
-      maxOpacity: rand(0.82, 0.98),
-      // White flower borne on this sprig (a subset of leaves flower). It only
-      // opens after the leaves have filled, and staggered by bloomThresh so the
-      // flowers keep popping in and filling the area the longer you stay.
-      hasFlower: Math.random() < 0.55,
+      nx, ny,
+      angle,                                       // outward growth direction (radians)
+      sprite: randi(leafSprites.length || 1),      // cached silhouette+colour
+      size: big ? rand(19, 30) : rand(11, 20),     // single-leaf length (reference px)
+      growth: 0, target: 0,
+      flutter: rand(0, Math.PI * 2),               // unique phase offset
+      flutterSpd: rand(0.55, 1.5),                 // unique sway speed
+      swayAmt: rand(0.04, 0.16),                   // unique sway amount
+      unfurl: rand(-0.5, 0.5),                     // rotation offset that resolves as it grows
+      maxOpacity: rand(0.85, 1.0),
+      // White flower borne on a subset of leaves; opens after the leaves fill.
+      hasFlower: Math.random() < 0.2,
       bloomThresh: Math.random(),
       flower: 0,
-      petals: Math.random() < 0.5 ? 5 : 6,
-      flowerSize: rand(4, 9),
-      foffx: rand(-7, 7), foffy: rand(-9, 4),
+      flowerSize: rand(5, 9),
+      foff: rand(0.35, 0.7),                       // where along the leaf the flower sits
       flowerPhase: rand(0, Math.PI * 2),
     };
   }
@@ -810,15 +976,14 @@
   }
 
   function spawnFaller(lf) {
-    // A single small detached leaflet drifts down.
+    // The leaf detaches and drifts down, keeping its sprite, rotating as it falls.
     fallers.push({
       x: toScreenX(lf.nx), y: toScreenY(lf.ny),
-      vx: rand(-12, 12), vy: rand(2, 10),
-      rot: lf.angle, vr: rand(-1.5, 1.5),
-      size: lf.size * rand(0.26, 0.4),
-      shapeType: Math.floor(Math.random() * 4),
-      hue: lf.hue, sat: lf.sat, lit: lf.lit + 6,
-      life: rand(2.2, 4.0), maxLife: 4.0, baseOp: lf.maxOpacity,
+      vx: rand(-14, 14), vy: rand(2, 12),
+      rot: lf.angle + Math.PI / 2, vr: rand(-2, 2),
+      size: lf.size * rand(0.85, 1.05),
+      sprite: lf.sprite,
+      life: rand(2.4, 4.2), maxLife: 4.2, baseOp: lf.maxOpacity,
       op: lf.maxOpacity, seed: rand(0, 10),
     });
   }
@@ -863,149 +1028,65 @@
     }
   }
 
-  // Draw one small leaflet in one of four shapes, like the reference foliage:
-  //   0 almond, 1 round/oval, 2 teardrop (pointed base), 3 ovate (wide base).
-  // Grown from the base at (0,0) toward (0,-len). A soft vein on non-round ones.
-  function drawLeafShape(ctx, len, wide, color, op, type) {
-    ctx.globalAlpha = op;
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    if (type === 1) {
-      // round / oval leaf
-      ctx.ellipse(0, -len * 0.5, wide * 0.98, len * 0.5, 0, 0, Math.PI * 2);
-    } else if (type === 2) {
-      // teardrop: pointed at the base, round at the tip
-      ctx.moveTo(0, 0);
-      ctx.bezierCurveTo(wide * 1.05, -len * 0.55, wide * 0.45, -len, 0, -len);
-      ctx.bezierCurveTo(-wide * 0.45, -len, -wide * 1.05, -len * 0.55, 0, 0);
-    } else if (type === 3) {
-      // ovate: widest near the base, rounded — a little heart-like
-      ctx.moveTo(0, -len);
-      ctx.bezierCurveTo(wide * 1.2, -len * 0.68, wide * 0.95, -len * 0.04, 0, 0);
-      ctx.bezierCurveTo(-wide * 0.95, -len * 0.04, -wide * 1.2, -len * 0.68, 0, -len);
-    } else {
-      // almond
-      ctx.moveTo(0, 0);
-      ctx.bezierCurveTo(wide, -len * 0.18, wide * 0.85, -len * 0.85, 0, -len);
-      ctx.bezierCurveTo(-wide * 0.85, -len * 0.85, -wide, -len * 0.18, 0, 0);
-    }
-    ctx.fill();
-    // (central vein omitted — barely visible at this size and costly per leaflet
-    //  when there are thousands of leaves; dropping it keeps the frame rate up.)
-  }
-
-  // Draw a whole sprig: a curved twig from (0,0) up to (0,-len) with leaflets
-  // arranged in pairs along it (plus a terminal leaflet), per lf.leaflets.
-  function drawSprig(len, color, op, lf) {
-    const ctx = leafCtx;
-    const bx = lf.bend * len * 0.16;   // sideways bow of the twig at its middle
-    const tx = lf.bend * len * 0.08;   // where the tip lands
-
-    // the twig
-    ctx.globalAlpha = op * 0.85;
-    ctx.strokeStyle = `hsl(${lf.hue} ${Math.max(10, lf.sat * 0.6)}% ${Math.max(16, lf.lit - 20)}%)`;
-    ctx.lineWidth = Math.max(0.5, len * 0.05);
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.quadraticCurveTo(bx, -len * 0.5, tx, -len);
-    ctx.stroke();
-
-    // the leaflets, placed along the twig's curve
-    for (const lt of lf.leaflets) {
-      const t = lt.t;
-      const px = 2 * (1 - t) * t * bx + t * t * tx;   // x on the quadratic at t
-      const py = -len * t;                             // y on the quadratic at t
-      const ll = len * lt.ll;
-      ctx.save();
-      ctx.translate(px, py);
-      ctx.rotate(lt.side * lt.ang);
-      drawLeafShape(ctx, ll, ll * lt.wd, color, op, lt.ty);
-      ctx.restore();
-    }
-  }
-
   function drawLeaves() {
-    leafCtx.clearRect(0, 0, viewW, viewH);
+    const ctx = leafCtx;
+    ctx.clearRect(0, 0, viewW, viewH);
     const p = parallax(CONFIG.parallax.leaf);
     const breath = 0.5 + 0.5 * Math.sin(time * 0.8);       // canopy breathing 0..1
     // Scale leaves/flowers to the displayed tree so coverage looks the same at
     // any window size (sizes are authored relative to a 720px-short-side tree).
     const treeScale = (fit.h ? Math.min(fit.w, fit.h) : Math.min(viewW, viewH)) / 720;
+    // Shared motion influences (mouse velocity, audio, ambient wind).
+    const motion = breeze * 0.5 + wind * 0.8 + audioLevel * 0.5;
+    const nSprites = leafSprites.length;
 
     for (const lf of leaves) {
-      if (lf.growth < 0.02) continue;
+      if (lf.growth < 0.02 || !nSprites) continue;
       const g = lf.growth;
-
       const sx = toScreenX(lf.nx) + p.x;
       const sy = toScreenY(lf.ny) + p.y;
 
-      // Growth maps to the sprig's overall scale (bud -> young -> full sprig).
-      const scale = lerp(0.16, 1, g);
+      // Growth: bud -> small -> full (scale + opacity + a slight unfurl rotation).
+      const scale = lerp(0.12, 1, g);
+      const spr = leafSprites[lf.sprite];
       const len = lf.size * scale * treeScale;
+      const w = len * spr.ar;
 
-      // Flutter: ambient breeze always, stronger with wind + audio + fast mouse.
-      const fl = Math.sin(time * lf.flutterSpd * 2 + lf.flutter);
-      const sway = fl * (0.1 + breeze * 0.45 + wind * 0.6 + audioLevel * 0.4);
-      // Gentle pulsing of opacity for that "breathing" shimmer.
-      const pulse = 0.92 + 0.08 * Math.sin(time * 1.3 + lf.flutter) * (0.4 + breath * 0.6);
+      // Unique, unsynchronized sway; an unfurl that resolves to 0 as it grows.
+      const sway = Math.sin(time * lf.flutterSpd + lf.flutter) * (lf.swayAmt + motion * 0.5);
+      const unfurl = (1 - g) * lf.unfurl;
+      const pulse = 0.9 + 0.1 * Math.sin(time * 1.2 + lf.flutter) * (0.4 + breath * 0.6);
 
-      const angle = lf.angle + sway;
-      const op = lf.maxOpacity * g * pulse;
-      const color = `hsl(${lf.hue} ${lf.sat}% ${lf.lit + (1 - g) * 12}%)`;
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(lf.angle + Math.PI / 2 + sway + unfurl);   // base on branch, tip outward
+      ctx.globalAlpha = lf.maxOpacity * g * pulse;
+      ctx.drawImage(spr.canvas, -w / 2, -len, w, len);
+      ctx.restore();
 
-      leafCtx.save();
-      leafCtx.translate(sx, sy);
-      leafCtx.rotate(angle);
-      drawSprig(len, color, op, lf);
-      leafCtx.restore();
-
-      // White flower on top of the foliage (opens after the leaves fill).
-      if (lf.flower > 0.02) drawFlower(sx + lf.foffx * scale * treeScale, sy + lf.foffy * scale * treeScale, lf, treeScale);
+      // A white flower sits partway out along some leaves (opens after fill).
+      if (lf.flower > 0.02 && flowerSprite) {
+        const ox = Math.cos(lf.angle), oy = Math.sin(lf.angle);
+        const fx = sx + ox * len * lf.foff, fy = sy + oy * len * lf.foff;
+        const fr = lf.flowerSize * (0.5 + 0.5 * lf.flower) * treeScale *
+                   (1 + 0.05 * Math.sin(time * 1.5 + lf.flowerPhase));
+        ctx.globalAlpha = lf.flower;
+        ctx.drawImage(flowerSprite, fx - fr, fy - fr, fr * 2, fr * 2);
+      }
     }
 
-    // Detached, falling leaves.
+    // Detached, falling leaves keep their sprite, rotating and fading as they go.
     for (const f of fallers) {
-      leafCtx.save();
-      leafCtx.translate(f.x + p.x, f.y + p.y);
-      leafCtx.rotate(f.rot);
-      const color = `hsl(${f.hue} ${f.sat}% ${f.lit}%)`;
-      drawLeafShape(leafCtx, f.size, f.size * 0.55, color, f.op, f.shapeType);
-      leafCtx.restore();
+      const spr = leafSprites[f.sprite] || leafSprites[0];
+      if (!spr) break;
+      const h = f.size * treeScale, w = h * spr.ar;
+      ctx.save();
+      ctx.translate(f.x + p.x, f.y + p.y);
+      ctx.rotate(f.rot);
+      ctx.globalAlpha = f.op;
+      ctx.drawImage(spr.canvas, -w / 2, -h / 2, w, h);
+      ctx.restore();
     }
-    leafCtx.globalAlpha = 1;
-  }
-
-  // A small white flower: a ring of petals around a golden centre, with a faint
-  // soft shadow so the white reads against pale paper. Scales open with `flower`.
-  function drawFlower(x, y, lf, treeScale = 1) {
-    const ctx = leafCtx;
-    const f = lf.flower;
-    const pulse = 1 + 0.05 * Math.sin(time * 1.5 + lf.flowerPhase);
-    const rr = lf.flowerSize * (0.4 + 0.6 * f) * pulse * treeScale;   // petal-ring radius
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(lf.flowerPhase);
-    // soft shadow to lift the white off the paper
-    ctx.globalAlpha = f * 0.18;
-    ctx.fillStyle = 'rgba(80, 85, 70, 1)';
-    ctx.beginPath(); ctx.arc(0, 0, rr * 1.6, 0, Math.PI * 2); ctx.fill();
-    // petals
-    ctx.globalAlpha = f * 0.96;
-    for (let i = 0; i < lf.petals; i++) {
-      const a = (i / lf.petals) * Math.PI * 2;
-      const px = Math.cos(a) * rr, py = Math.sin(a) * rr;
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.97)';
-      ctx.beginPath();
-      ctx.ellipse(px, py, rr * 0.64, rr * 0.4, a, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.lineWidth = 0.5; ctx.strokeStyle = 'rgba(140, 140, 128, 0.25)'; ctx.stroke();
-    }
-    // golden centre
-    ctx.globalAlpha = f;
-    ctx.fillStyle = 'rgba(242, 206, 112, 0.95)';
-    ctx.beginPath(); ctx.arc(0, 0, rr * 0.42, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
     ctx.globalAlpha = 1;
   }
 
@@ -1224,6 +1305,8 @@
   });
 
   resize();
+  buildLeafSprites();      // pre-render the leaf silhouette/colour library once
+  buildFlowerSprite();     // pre-render the white flower once
   initAmbient();
   bindUI();
   loadImage();
