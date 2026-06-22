@@ -41,7 +41,7 @@
   const IMAGE_SRC = 'tree.png';   // <-- replace this file to use your own art
 
   const CONFIG = {
-    maxLeaves:        3200,   // denser foliage — more sprigs along the branches
+    maxLeaves:        3300,   // biased onto thin twigs and tips (see sampling)
     darkThreshold:    185,    // catches faint twigs; edge test below rejects smudges
     topBias:          1.1,    // gentler bias so leaves spread onto small branches everywhere
     // Growth radius as a FRACTION of the displayed tree's short side, so it
@@ -222,18 +222,24 @@
     const candidates = [];
     for (let y = 0; y < SAMPLE_H; y++) {
       const vy = y / SAMPLE_H;                       // 0 top -> 1 bottom
-      const topWeight = Math.pow(1 - vy, CONFIG.topBias) + 0.3;
+      const topWeight = Math.pow(1 - vy, CONFIG.topBias) + 0.35;
       for (let x = 0; x < SAMPLE_W; x++) {
         const p = y * SAMPLE_W + x;
         if (lumA[p] >= DARK) continue;                // not ink
-        let edge = false;
+        // Count how many neighbours are bright paper. A thin twig or a branch
+        // TIP is surrounded by paper on almost all sides -> high count; the
+        // interior of a thick mass/smudge has none.
+        let bright = 0;
         for (let k = 0; k < dirs.length; k++) {
           const nx = x + dirs[k][0], ny = y + dirs[k][1];
-          if (nx < 0 || ny < 0 || nx >= SAMPLE_W || ny >= SAMPLE_H) { edge = true; break; }
-          if (lumA[ny * SAMPLE_W + nx] > BRIGHT) { edge = true; break; }
+          if (nx < 0 || ny < 0 || nx >= SAMPLE_W || ny >= SAMPLE_H || lumA[ny * SAMPLE_W + nx] > BRIGHT) bright++;
         }
-        if (!edge) continue;                          // interior of a smudge/mass -> skip
-        if (Math.random() < topWeight) candidates.push(x / SAMPLE_W, y / SAMPLE_H);
+        if (bright === 0) continue;                   // interior of a mass -> skip
+        // Bias strongly toward thin structures and tips so leaves cover the
+        // very ends of the twigs, not just the thicker branches.
+        const thinness = bright / dirs.length;        // 0..1 (1 = isolated/tip)
+        const prob = topWeight * (0.3 + thinness * 1.1);
+        if (Math.random() < prob) candidates.push(x / SAMPLE_W, y / SAMPLE_H);
       }
     }
 
