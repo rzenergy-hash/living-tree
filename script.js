@@ -41,11 +41,11 @@
   const IMAGE_SRC = 'tree.png';   // <-- replace this file to use your own art
 
   const CONFIG = {
-    maxLeaves:        4500,   // cap on individual leaves (placed in clusters)
+    maxLeaves:        6500,   // cap on individual leaves (placed in clusters) — dense canopy
     darkThreshold:    185,    // catches faint twigs; edge test below rejects smudges
     topBias:          1.05,   // gentle bias toward the upper canopy when seeding
-    clusterMin:       3,      // leaves in a small cluster
-    clusterMax:       12,     // leaves in a medium cluster
+    clusterMin:       4,      // leaves in a small cluster
+    clusterMax:       16,     // leaves in a medium cluster
     // Growth radius as a FRACTION of the displayed tree's short side, so it
     // covers the same proportion of the artwork on any screen size.
     growthRadiusMoveFrac: 0.22,   // while the mouse is moving
@@ -62,15 +62,15 @@
     spriteColorsEach: 4,      // colour variations rendered per silhouette
   };
 
-  // Leaf palette: sage, olive, yellow-green, with the occasional muted golden.
+  // Ginkgo palette from the reference: olive, grey-green, yellow-green, golden.
   // `w` is the relative chance of a leaf taking that colour (golden is rare).
   const PALETTE = [
-    { h: 88,  s: 30, l: 47, w: 1.0 },  // sage green
-    { h: 78,  s: 42, l: 42, w: 1.0 },  // olive
-    { h: 68,  s: 50, l: 47, w: 1.0 },  // yellow-green
-    { h: 60,  s: 55, l: 50, w: 0.8 },  // brighter yellow-green
-    { h: 96,  s: 24, l: 50, w: 0.7 },  // dusty sage
-    { h: 47,  s: 60, l: 54, w: 0.18 }, // muted golden (occasional)
+    { h: 80,  s: 38, l: 43, w: 1.0 },  // olive green
+    { h: 88,  s: 20, l: 50, w: 1.0 },  // grey-green
+    { h: 68,  s: 48, l: 48, w: 1.0 },  // yellow-green
+    { h: 60,  s: 54, l: 52, w: 0.85 }, // brighter yellow-green
+    { h: 96,  s: 14, l: 55, w: 0.7 },  // pale grey-green
+    { h: 47,  s: 58, l: 55, w: 0.22 }, // muted golden (occasional)
   ];
 
   // ---- Canvas / layer setup ------------------------------------------
@@ -159,14 +159,16 @@
     leafSprites = [];
     const SH = 80;                       // sprite render height (px) — downscaled when drawn
     for (let s = 0; s < CONFIG.spriteVariants; s++) {
-      // silhouette parameters for this variant
+      // GINKGO fan parameters: short & round, wider than tall, wavy top edge,
+      // sometimes a central cleft. (No veins — kept lightweight.)
       const shape = {
-        belly:  rand(0.42, 1.0),         // narrow (low) .. rounded (high)
-        curve:  rand(-0.5, 0.5),         // sideways bend
-        tip:    rand(0.25, 0.85),        // tip sharpness (low = pointy)
-        w1: rand(-0.18, 0.18), w2: rand(-0.18, 0.18),   // edge wobble (irregular edges)
-        w3: rand(-0.18, 0.18), w4: rand(-0.18, 0.18),
-        baseW: rand(0.18, 0.4),          // how wide near the stalk
+        fan:   rand(0.78, 1.0),          // fan width
+        cleft: Math.random() < 0.55 ? rand(0.15, 0.55) : 0,  // central notch (some leaves)
+        lean:  rand(-0.16, 0.16),        // slight sideways lean
+        tl: rand(-0.05, 0.05), tr: rand(-0.05, 0.05),        // top-corner height jitter
+        w1: rand(-0.5, 0.5), w2: rand(-0.5, 0.5),            // top-edge wobble (irregular)
+        w3: rand(-0.5, 0.5), w4: rand(-0.5, 0.5),
+        ar: rand(1.0, 1.4),              // width / height (short, round)
       };
       for (let cI = 0; cI < CONFIG.spriteColorsEach; cI++) {
         const pal = pickPalette();
@@ -176,29 +178,36 @@
     }
   }
 
-  // Build the outline path for a leaf into ctx (centred in a W x H box).
+  // Build a GINKGO-leaf fan outline into ctx (base/stalk at bottom-centre, the
+  // fan opening upward). Wider than tall, slightly irregular top, optional cleft.
   function leafOutline(ctx, W, H, sh) {
-    const baseX = W / 2, baseY = H - 2;
-    const tipX = W / 2 + sh.curve * W * 0.28, tipY = 2;
-    const midY = baseY * 0.5 + tipY * 0.5;
-    const half = (W / 2 - 1) * sh.belly;
+    const baseX = W / 2, baseY = H - 1;
+    const topY = H * 0.16;
+    const half = (W / 2 - 1) * sh.fan;
+    const cx = W / 2 + sh.lean * W * 0.4;                 // top centre leans slightly
+    const cleft = sh.cleft * (H * 0.16);
+    const wob = (k) => 1 + k * 0.1;                       // small edge irregularity
     ctx.beginPath();
     ctx.moveTo(baseX, baseY);
-    // right edge: stalk -> belly -> tip
+    // left side: bulge out (rounded belly) and up from the stalk to the top-left
     ctx.bezierCurveTo(
-      baseX + half * sh.baseW, baseY - (baseY - midY) * 0.35,
-      baseX + half * (1 + sh.w1), midY + sh.w2 * H * 0.12,
-      tipX, tipY);
-    // left edge: tip -> belly -> stalk
+      cx - half * 0.62, baseY - (baseY - topY) * 0.42,
+      cx - half * wob(sh.w1), topY + H * 0.30,
+      cx - half * wob(sh.w2), topY + sh.tl * H);
+    // wavy, rounded top edge dipping to a central cleft
+    ctx.quadraticCurveTo(cx - half * 0.5, topY - H * 0.05 * sh.w3, cx - cleft * 0.3, topY + cleft);
+    ctx.quadraticCurveTo(cx, topY + cleft * 1.5, cx + cleft * 0.3, topY + cleft);
+    ctx.quadraticCurveTo(cx + half * 0.5, topY - H * 0.05 * sh.w4, cx + half * wob(sh.w2), topY + sh.tr * H);
+    // right side back down to the stalk
     ctx.bezierCurveTo(
-      baseX - half * (1 + sh.w3), midY + sh.w4 * H * 0.12,
-      baseX - half * sh.baseW, baseY - (baseY - midY) * 0.35,
+      cx + half * wob(sh.w1), topY + H * 0.30,
+      cx + half * 0.62, baseY - (baseY - topY) * 0.42,
       baseX, baseY);
     ctx.closePath();
   }
 
   function renderLeafSprite(SH, sh, col) {
-    const ar = clamp(sh.belly * 0.72, 0.32, 0.78);   // width / height
+    const ar = sh.ar;                                // width / height (ginkgo: wide)
     const W = Math.round(SH * ar), H = SH;
     const c = document.createElement('canvas');
     c.width = W; c.height = H;
