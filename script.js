@@ -159,16 +159,15 @@
     leafSprites = [];
     const SH = 80;                       // sprite render height (px) — downscaled when drawn
     for (let s = 0; s < CONFIG.spriteVariants; s++) {
-      // GINKGO fan parameters: short & round, wider than tall, wavy top edge,
-      // sometimes a central cleft. (No veins — kept lightweight.)
+      // GINKGO fan parameters: a circular-sector blade (rounded arc top, a
+      // central cleft, gently scalloped edge) tapering to a thin stalk. Not a
+      // triangle. (No veins — kept lightweight.)
       const shape = {
-        fan:   rand(0.78, 1.0),          // fan width
-        cleft: Math.random() < 0.55 ? rand(0.15, 0.55) : 0,  // central notch (some leaves)
-        lean:  rand(-0.16, 0.16),        // slight sideways lean
-        tl: rand(-0.05, 0.05), tr: rand(-0.05, 0.05),        // top-corner height jitter
-        w1: rand(-0.5, 0.5), w2: rand(-0.5, 0.5),            // top-edge wobble (irregular)
-        w3: rand(-0.5, 0.5), w4: rand(-0.5, 0.5),
-        ar: rand(1.0, 1.4),              // width / height (short, round)
+        spread:  rand(1.55, 2.05),       // half-angle of the fan (wider = fuller)
+        cleft:   Math.random() < 0.72 ? rand(0.14, 0.34) : 0.04,  // central notch depth
+        scallop: Math.round(rand(5, 11)),// number of soft scallops along the arc
+        scaleA:  rand(0.025, 0.06),      // scallop amplitude
+        lean:    rand(-0.12, 0.12),      // slight sideways lean
       };
       for (let cI = 0; cI < CONFIG.spriteColorsEach; cI++) {
         const pal = pickPalette();
@@ -178,37 +177,40 @@
     }
   }
 
-  // Build a GINKGO-leaf fan outline into ctx (base/stalk at bottom-centre, the
-  // fan opening upward). Wider than tall, slightly irregular top, optional cleft.
+  // Geometry of a ginkgo blade for a given sprite height: apex (where the stalk
+  // meets the blade) and the fan radius. Shared by the outline and the stalk.
+  function ginkgoGeom(H, sh) {
+    const ay = H * 0.72;                 // apex y (the stalk runs below this)
+    const r = ay - H * 0.07;             // blade radius (arc reaches near the top)
+    const halfW = r * Math.sin(Math.min(sh.spread, Math.PI / 2 + 0.2));
+    return { ay, r, halfW };
+  }
+
+  // Build a GINKGO blade outline (a scalloped circular sector) into ctx. The
+  // apex is at (W/2 + lean, ay); the arc fans upward; two straight-ish radii
+  // come back to the apex. A dip at the centre makes the characteristic cleft.
   function leafOutline(ctx, W, H, sh) {
-    const baseX = W / 2, baseY = H - 1;
-    const topY = H * 0.16;
-    const half = (W / 2 - 1) * sh.fan;
-    const cx = W / 2 + sh.lean * W * 0.4;                 // top centre leans slightly
-    const cleft = sh.cleft * (H * 0.16);
-    const wob = (k) => 1 + k * 0.1;                       // small edge irregularity
+    const { ay, r } = ginkgoGeom(H, sh);
+    const ax = W / 2 + sh.lean * W * 0.16;
+    const N = 16;
     ctx.beginPath();
-    ctx.moveTo(baseX, baseY);
-    // left side: bulge out (rounded belly) and up from the stalk to the top-left
-    ctx.bezierCurveTo(
-      cx - half * 0.62, baseY - (baseY - topY) * 0.42,
-      cx - half * wob(sh.w1), topY + H * 0.30,
-      cx - half * wob(sh.w2), topY + sh.tl * H);
-    // wavy, rounded top edge dipping to a central cleft
-    ctx.quadraticCurveTo(cx - half * 0.5, topY - H * 0.05 * sh.w3, cx - cleft * 0.3, topY + cleft);
-    ctx.quadraticCurveTo(cx, topY + cleft * 1.5, cx + cleft * 0.3, topY + cleft);
-    ctx.quadraticCurveTo(cx + half * 0.5, topY - H * 0.05 * sh.w4, cx + half * wob(sh.w2), topY + sh.tr * H);
-    // right side back down to the stalk
-    ctx.bezierCurveTo(
-      cx + half * wob(sh.w1), topY + H * 0.30,
-      cx + half * 0.62, baseY - (baseY - topY) * 0.42,
-      baseX, baseY);
-    ctx.closePath();
+    ctx.moveTo(ax, ay);
+    for (let i = 0; i <= N; i++) {
+      const f = i / N;
+      const ang = -Math.PI / 2 - sh.spread + 2 * sh.spread * f;   // sweep over the top
+      let rr = r * (1 + sh.scaleA * Math.sin(f * Math.PI * sh.scallop));  // scalloped edge
+      const dc = Math.abs(f - 0.5);
+      if (dc < 0.06) rr -= sh.cleft * r * (1 - dc / 0.06);         // central cleft
+      ctx.lineTo(ax + rr * Math.cos(ang), ay + rr * Math.sin(ang));
+    }
+    ctx.closePath();   // straight radius from the last arc point back to the apex
   }
 
   function renderLeafSprite(SH, sh, col) {
-    const ar = sh.ar;                                // width / height (ginkgo: wide)
-    const W = Math.round(SH * ar), H = SH;
+    const H = SH;
+    const { ay, r, halfW } = ginkgoGeom(H, sh);
+    const W = Math.round(halfW * 2 + H * 0.14);     // canvas wide enough for the fan
+    const ar = W / H;
     const c = document.createElement('canvas');
     c.width = W; c.height = H;
     const x = c.getContext('2d');
@@ -239,12 +241,14 @@
     }
     x.restore();
 
-    // a faint short stalk at the base
-    x.strokeStyle = hsla(col.h, Math.max(12, col.s - 18), Math.max(16, col.l - 24), 0.5);
-    x.lineWidth = Math.max(1, W * 0.05);
+    // the thin stalk (petiole): from the bottom up to the blade apex
+    const ax = W / 2 + sh.lean * W * 0.16;
+    x.strokeStyle = hsla(col.h, Math.max(12, col.s - 16), Math.max(16, col.l - 22), 0.85);
+    x.lineCap = 'round';
+    x.lineWidth = Math.max(1.2, W * 0.045);
     x.beginPath();
-    x.moveTo(W / 2, H);
-    x.lineTo(W / 2, H - H * 0.14);
+    x.moveTo(W / 2, H - 1);
+    x.quadraticCurveTo((W / 2 + ax) / 2, (H + ay) / 2, ax, ay);
     x.stroke();
 
     return { canvas: c, ar: W / H };
