@@ -41,7 +41,7 @@
   const IMAGE_SRC = 'tree.png';   // <-- replace this file to use your own art
 
   const CONFIG = {
-    maxLeaves:        2400,   // dense enough to also coat the thin twigs
+    maxLeaves:        3200,   // denser foliage — more sprigs along the branches
     darkThreshold:    185,    // catches faint twigs; edge test below rejects smudges
     topBias:          1.1,    // gentler bias so leaves spread onto small branches everywhere
     // Growth radius as a FRACTION of the displayed tree's short side, so it
@@ -256,7 +256,7 @@
       : Math.floor(Math.random() * 4)];
 
     // Build the leaflets arranged along the twig.
-    const pairs = 2 + Math.floor(Math.random() * 4);   // 2–5 pairs
+    const pairs = 3 + Math.floor(Math.random() * 4);   // 3–6 pairs (fuller sprigs)
     const leaflets = [];
     for (let i = 1; i <= pairs; i++) {
       const t = i / (pairs + 1);                       // position along the twig 0..1
@@ -868,16 +868,8 @@
       ctx.bezierCurveTo(-wide * 0.85, -len * 0.85, -wide, -len * 0.18, 0, 0);
     }
     ctx.fill();
-    if (type !== 1) {
-      // faint central vein
-      ctx.globalAlpha = op * 0.35;
-      ctx.strokeStyle = 'rgba(40,50,30,0.5)';
-      ctx.lineWidth = Math.max(0.4, len * 0.03);
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(0, -len * 0.9);
-      ctx.stroke();
-    }
+    // (central vein omitted — barely visible at this size and costly per leaflet
+    //  when there are thousands of leaves; dropping it keeps the frame rate up.)
   }
 
   // Draw a whole sprig: a curved twig from (0,0) up to (0,-len) with leaflets
