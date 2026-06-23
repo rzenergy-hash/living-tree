@@ -65,12 +65,12 @@
   // Ginkgo palette from the reference: olive, grey-green, yellow-green, golden.
   // `w` is the relative chance of a leaf taking that colour (golden is rare).
   const PALETTE = [
-    { h: 80,  s: 38, l: 43, w: 1.0 },  // olive green
-    { h: 88,  s: 20, l: 50, w: 1.0 },  // grey-green
-    { h: 68,  s: 48, l: 48, w: 1.0 },  // yellow-green
-    { h: 60,  s: 54, l: 52, w: 0.85 }, // brighter yellow-green
-    { h: 96,  s: 14, l: 55, w: 0.7 },  // pale grey-green
-    { h: 47,  s: 58, l: 55, w: 0.22 }, // muted golden (occasional)
+    { h: 96,  s: 46, l: 42, w: 1.3 },  // leaf green
+    { h: 88,  s: 44, l: 40, w: 1.2 },  // sage green
+    { h: 82,  s: 48, l: 41, w: 1.1 },  // olive green
+    { h: 104, s: 38, l: 45, w: 0.9 },  // cool green
+    { h: 70,  s: 50, l: 46, w: 0.6 },  // yellow-green (less)
+    { h: 48,  s: 56, l: 54, w: 0.12 }, // muted golden (rare)
   ];
 
   // ---- Canvas / layer setup ------------------------------------------
@@ -130,7 +130,7 @@
   let soundNodes = null;
 
   // User-tunable settings (bound to sliders)
-  const settings = { growthSens: 1, audioSens: 1, windStr: 1 };
+  const settings = { growthSens: 0.65, audioSens: 1, windStr: 1 };
 
   // ---- Utility --------------------------------------------------------
   const rand  = (a, b) => a + Math.random() * (b - a);
