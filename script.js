@@ -379,9 +379,9 @@
     const candidates = [];
     for (let y = 0; y < SAMPLE_H; y++) {
       const vy = y / SAMPLE_H;                       // 0 top -> 1 bottom
-      // Keep leaves full through the upper canopy, then fade them out below the
-      // mid-trunk so the main foliage stays up top and thins toward the base.
-      const topWeight = vy < 0.42 ? 1 : clamp(1 - (vy - 0.42) / 0.42, 0.04, 1);
+      // Keep leaves full through the top, then start thinning around the middle
+      // of the trunk so the main foliage stays up top and tapers off going down.
+      const topWeight = vy < 0.30 ? 1 : clamp(1 - (vy - 0.30) / 0.34, 0.03, 1);
       for (let x = 0; x < SAMPLE_W; x++) {
         const p = y * SAMPLE_W + x;
         if (lumA[p] >= DARK) continue;                // not ink
