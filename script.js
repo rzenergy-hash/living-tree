@@ -41,11 +41,11 @@
   const IMAGE_SRC = 'tree.png';   // <-- replace this file to use your own art
 
   const CONFIG = {
-    maxLeaves:        6500,   // cap on individual leaves (placed in clusters) — dense canopy
+    maxLeaves:        8500,   // cap on individual leaves (smaller leaves -> use more)
     darkThreshold:    185,    // catches faint twigs; edge test below rejects smudges
     topBias:          1.05,   // gentle bias toward the upper canopy when seeding
-    clusterMin:       4,      // leaves in a small cluster
-    clusterMax:       16,     // leaves in a medium cluster
+    clusterMin:       5,      // leaves in a small cluster
+    clusterMax:       18,     // leaves in a medium cluster
     // Growth radius as a FRACTION of the displayed tree's short side, so it
     // covers the same proportion of the artwork on any screen size.
     growthRadiusMoveFrac: 0.22,   // while the mouse is moving
@@ -163,7 +163,7 @@
       // central cleft, gently scalloped edge) tapering to a thin stalk. Not a
       // triangle. (No veins — kept lightweight.)
       const shape = {
-        spread:  rand(1.55, 2.05),       // half-angle of the fan (wider = fuller)
+        spread:  rand(0.85, 1.25),       // narrower fan -> more slender leaf
         cleft:   Math.random() < 0.72 ? rand(0.14, 0.34) : 0.04,  // central notch depth
         scallop: Math.round(rand(5, 11)),// number of soft scallops along the arc
         scaleA:  rand(0.025, 0.06),      // scallop amplitude
@@ -180,8 +180,8 @@
   // Geometry of a ginkgo blade for a given sprite height: apex (where the stalk
   // meets the blade) and the fan radius. Shared by the outline and the stalk.
   function ginkgoGeom(H, sh) {
-    const ay = H * 0.72;                 // apex y (the stalk runs below this)
-    const r = ay - H * 0.07;             // blade radius (arc reaches near the top)
+    const ay = H * 0.76;                 // apex lower -> longer stalk, more slender leaf
+    const r = ay - H * 0.06;             // blade radius (arc reaches near the top)
     const halfW = r * Math.sin(Math.min(sh.spread, Math.PI / 2 + 0.2));
     return { ay, r, halfW };
   }
@@ -469,7 +469,7 @@
       nx, ny,
       angle,                                       // outward growth direction (radians)
       sprite: randi(leafSprites.length || 1),      // cached silhouette+colour
-      size: big ? rand(19, 30) : rand(11, 20),     // single-leaf length (reference px)
+      size: big ? rand(15, 23) : rand(8, 15),      // smaller leaves
       growth: 0, target: 0,
       flutter: rand(0, Math.PI * 2),               // unique phase offset
       flutterSpd: rand(0.55, 1.5),                 // unique sway speed
