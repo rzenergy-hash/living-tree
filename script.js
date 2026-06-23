@@ -104,6 +104,7 @@
 
   // Pre-rendered art (built once, reused every frame for performance).
   let leafSprites = [];                     // [{canvas, ar}] varied leaf silhouettes + colours
+  let leafSpritesDark = [];                 // darker copies (same index) for "back" leaves
   let flowerSprite = null;                  // cached white flower
 
   // Pointer + motion
@@ -157,6 +158,7 @@
   */
   function buildLeafSprites() {
     leafSprites = [];
+    leafSpritesDark = [];                // parallel darker copies for "back" leaves (depth)
     const SH = 80;                       // sprite render height (px) — downscaled when drawn
     for (let s = 0; s < CONFIG.spriteVariants; s++) {
       // GINKGO fan parameters: a circular-sector blade (rounded arc top, a
@@ -173,6 +175,8 @@
         const pal = pickPalette();
         const col = { h: pal.h + rand(-7, 7), s: pal.s + rand(-8, 8), l: pal.l + rand(-7, 9) };
         leafSprites.push(renderLeafSprite(SH, shape, col));
+        // a darker, slightly cooler copy for leaves that sit "behind"
+        leafSpritesDark.push(renderLeafSprite(SH, shape, { h: col.h + 4, s: col.s + 4, l: col.l - 16 }));
       }
     }
   }
@@ -375,7 +379,9 @@
     const candidates = [];
     for (let y = 0; y < SAMPLE_H; y++) {
       const vy = y / SAMPLE_H;                       // 0 top -> 1 bottom
-      const topWeight = Math.pow(1 - vy, CONFIG.topBias) + 0.35;
+      // Keep leaves full through the upper canopy, then fade them out below the
+      // mid-trunk so the main foliage stays up top and thins toward the base.
+      const topWeight = vy < 0.42 ? 1 : clamp(1 - (vy - 0.42) / 0.42, 0.04, 1);
       for (let x = 0; x < SAMPLE_W; x++) {
         const p = y * SAMPLE_W + x;
         if (lumA[p] >= DARK) continue;                // not ink
@@ -469,6 +475,7 @@
       nx, ny,
       angle,                                       // outward growth direction (radians)
       sprite: randi(leafSprites.length || 1),      // cached silhouette+colour
+      back: Math.random() < 0.42,                  // a "behind" leaf — drawn darker & first
       size: big ? rand(15, 23) : rand(8, 15),      // smaller leaves
       growth: 0, target: 0,
       flutter: rand(0, Math.PI * 2),               // unique phase offset
@@ -1051,34 +1058,43 @@
     const treeScale = (fit.h ? Math.min(fit.w, fit.h) : Math.min(viewW, viewH)) / 720;
     // Shared motion influences (mouse velocity, audio, ambient wind).
     const motion = breeze * 0.5 + wind * 0.8 + audioLevel * 0.5;
-    const nSprites = leafSprites.length;
+    if (!leafSprites.length) { /* nothing to draw yet */ }
 
-    for (const lf of leaves) {
-      if (lf.growth < 0.02 || !nSprites) continue;
+    // Draw one leaf. `back` leaves use the darker sprite, sit a touch smaller and
+    // dimmer, and are drawn in the first pass so the brighter front leaves layer
+    // over them — giving the canopy front/back depth.
+    const drawLeaf = (lf) => {
+      if (lf.growth < 0.02) return;
       const g = lf.growth;
       const sx = toScreenX(lf.nx) + p.x;
       const sy = toScreenY(lf.ny) + p.y;
-
-      // Growth: bud -> small -> full (scale + opacity + a slight unfurl rotation).
-      const scale = lerp(0.12, 1, g);
-      const spr = leafSprites[lf.sprite];
+      const spr = (lf.back ? leafSpritesDark : leafSprites)[lf.sprite];
+      if (!spr) return;
+      const scale = lerp(0.12, 1, g) * (lf.back ? 0.9 : 1);
       const len = lf.size * scale * treeScale;
       const w = len * spr.ar;
-
-      // Unique, unsynchronized sway; an unfurl that resolves to 0 as it grows.
       const sway = Math.sin(time * lf.flutterSpd + lf.flutter) * (lf.swayAmt + motion * 0.5);
       const unfurl = (1 - g) * lf.unfurl;
       const pulse = 0.9 + 0.1 * Math.sin(time * 1.2 + lf.flutter) * (0.4 + breath * 0.6);
-
       ctx.save();
       ctx.translate(sx, sy);
       ctx.rotate(lf.angle + Math.PI / 2 + sway + unfurl);   // base on branch, tip outward
-      ctx.globalAlpha = lf.maxOpacity * g * pulse;
+      ctx.globalAlpha = lf.maxOpacity * g * pulse * (lf.back ? 0.85 : 1);
       ctx.drawImage(spr.canvas, -w / 2, -len, w, len);
       ctx.restore();
+    };
 
-      // A white flower sits partway out along some leaves (opens after fill).
-      if (lf.flower > 0.02 && flowerSprite) {
+    // Pass 1: back leaves (behind). Pass 2: front leaves (on top).
+    for (const lf of leaves) if (lf.back) drawLeaf(lf);
+    for (const lf of leaves) if (!lf.back) drawLeaf(lf);
+
+    // Pass 3: flowers on top of all the foliage.
+    if (flowerSprite) {
+      for (const lf of leaves) {
+        if (lf.flower < 0.02) continue;
+        const g = lf.growth;
+        const len = lf.size * lerp(0.12, 1, g) * treeScale;
+        const sx = toScreenX(lf.nx) + p.x, sy = toScreenY(lf.ny) + p.y;
         const ox = Math.cos(lf.angle), oy = Math.sin(lf.angle);
         const fx = sx + ox * len * lf.foff, fy = sy + oy * len * lf.foff;
         const fr = lf.flowerSize * (0.5 + 0.5 * lf.flower) * treeScale *
