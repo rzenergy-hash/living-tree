@@ -1251,6 +1251,16 @@
     requestAnimationFrame(frame);
   }
 
+  // Toggle browser fullscreen (F key). Resize is handled by the resize listener.
+  function toggleFullscreen() {
+    const el = document.documentElement;
+    if (!document.fullscreenElement) {
+      (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el);
+    } else {
+      (document.exitFullscreen || document.webkitExitFullscreen || (() => {})).call(document);
+    }
+  }
+
   // ---- Controls / UI --------------------------------------------------
   function bindUI() {
     const panel = document.getElementById('panel');
@@ -1262,6 +1272,7 @@
     toggle.addEventListener('click', togglePanel);
     window.addEventListener('keydown', (e) => {
       if (e.key === 'c' || e.key === 'C') togglePanel();
+      if (e.key === 'f' || e.key === 'F') toggleFullscreen();
     });
 
     const bind = (id, key) => {
