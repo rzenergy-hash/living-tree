@@ -163,7 +163,7 @@
       // central cleft, gently scalloped edge) tapering to a thin stalk. Not a
       // triangle. (No veins — kept lightweight.)
       const shape = {
-        spread:  rand(0.85, 1.25),       // narrower fan -> more slender leaf
+        spread:  rand(0.55, 0.92),       // narrow fan -> slender ginkgo blade
         cleft:   Math.random() < 0.72 ? rand(0.14, 0.34) : 0.04,  // central notch depth
         scallop: Math.round(rand(5, 11)),// number of soft scallops along the arc
         scaleA:  rand(0.025, 0.06),      // scallop amplitude
