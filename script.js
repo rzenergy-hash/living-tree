@@ -105,7 +105,8 @@
   // Pre-rendered art (built once, reused every frame for performance).
   let leafSprites = [];                     // [{canvas, ar}] varied leaf silhouettes + colours
   let leafSpritesDark = [];                 // darker copies (same index) for "back" leaves
-  let flowerSprite = null;                  // cached white flower
+  let flowerSprite = null;                  // cached white flower (front)
+  let flowerSpriteDark = null;              // dimmer flower for "back" depth
 
   // Pointer + motion
   const mouse = { x: -9999, y: -9999, px: -9999, py: -9999, inside: false, speed: 0 };
@@ -258,30 +259,34 @@
     return { canvas: c, ar: W / H };
   }
 
-  // A cached white flower sprite (petals + golden centre + soft halo).
+  // Cached flower sprites: a bright front one and a dimmer "back" one, so the
+  // blossoms have the same front/back depth as the leaves.
   function buildFlowerSprite() {
+    flowerSprite = renderFlowerSprite('rgba(255,255,255,0.97)', 'rgba(243,206,112,0.96)', 0.16);
+    flowerSpriteDark = renderFlowerSprite('rgba(214,218,205,0.95)', 'rgba(196,168,96,0.92)', 0.22);
+  }
+
+  function renderFlowerSprite(petal, centre, haloA) {
     const S = 64, c = document.createElement('canvas');
     c.width = S; c.height = S;
     const x = c.getContext('2d');
     const cx = S / 2, cy = S / 2, petals = 5, R = S * 0.3;
-    // soft halo so the white lifts off pale paper
+    // soft halo so the flower lifts off the paper / sits behind front leaves
     const halo = x.createRadialGradient(cx, cy, 0, cx, cy, S * 0.5);
-    halo.addColorStop(0, 'rgba(90,95,78,0.16)');
+    halo.addColorStop(0, `rgba(90,95,78,${haloA})`);
     halo.addColorStop(1, 'rgba(90,95,78,0)');
     x.fillStyle = halo; x.fillRect(0, 0, S, S);
-    // petals
     for (let i = 0; i < petals; i++) {
       const a = (i / petals) * Math.PI * 2;
       const px = cx + Math.cos(a) * R, py = cy + Math.sin(a) * R;
-      x.fillStyle = 'rgba(255,255,255,0.97)';
+      x.fillStyle = petal;
       x.beginPath();
       x.ellipse(px, py, R * 0.66, R * 0.42, a, 0, Math.PI * 2);
       x.fill();
     }
-    // golden centre
-    x.fillStyle = 'rgba(243,206,112,0.96)';
+    x.fillStyle = centre;
     x.beginPath(); x.arc(cx, cy, R * 0.44, 0, Math.PI * 2); x.fill();
-    flowerSprite = c;
+    return c;
   }
 
   // ---- Image load + branch detection ---------------------------------
@@ -1088,20 +1093,23 @@
     for (const lf of leaves) if (lf.back) drawLeaf(lf);
     for (const lf of leaves) if (!lf.back) drawLeaf(lf);
 
-    // Pass 3: flowers on top of all the foliage.
+    // Pass 3: flowers — back ones (dimmer) first, then front ones, so the
+    // blossoms carry the same front/back depth as the leaves.
+    const drawFlower = (lf) => {
+      if (lf.flower < 0.02) return;
+      const g = lf.growth;
+      const len = lf.size * lerp(0.12, 1, g) * treeScale * (lf.back ? 0.9 : 1);
+      const sx = toScreenX(lf.nx) + p.x, sy = toScreenY(lf.ny) + p.y;
+      const ox = Math.cos(lf.angle), oy = Math.sin(lf.angle);
+      const fx = sx + ox * len * lf.foff, fy = sy + oy * len * lf.foff;
+      const fr = lf.flowerSize * (0.5 + 0.5 * lf.flower) * treeScale * (lf.back ? 0.88 : 1) *
+                 (1 + 0.05 * Math.sin(time * 1.5 + lf.flowerPhase));
+      ctx.globalAlpha = lf.flower * (lf.back ? 0.9 : 1);
+      ctx.drawImage(lf.back ? flowerSpriteDark : flowerSprite, fx - fr, fy - fr, fr * 2, fr * 2);
+    };
     if (flowerSprite) {
-      for (const lf of leaves) {
-        if (lf.flower < 0.02) continue;
-        const g = lf.growth;
-        const len = lf.size * lerp(0.12, 1, g) * treeScale;
-        const sx = toScreenX(lf.nx) + p.x, sy = toScreenY(lf.ny) + p.y;
-        const ox = Math.cos(lf.angle), oy = Math.sin(lf.angle);
-        const fx = sx + ox * len * lf.foff, fy = sy + oy * len * lf.foff;
-        const fr = lf.flowerSize * (0.5 + 0.5 * lf.flower) * treeScale *
-                   (1 + 0.05 * Math.sin(time * 1.5 + lf.flowerPhase));
-        ctx.globalAlpha = lf.flower;
-        ctx.drawImage(flowerSprite, fx - fr, fy - fr, fr * 2, fr * 2);
-      }
+      for (const lf of leaves) if (lf.back) drawFlower(lf);
+      for (const lf of leaves) if (!lf.back) drawFlower(lf);
     }
 
     // Detached, falling leaves keep their sprite, rotating and fading as they go.
