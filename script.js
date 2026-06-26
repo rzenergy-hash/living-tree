@@ -510,12 +510,11 @@
       c.getContext('2d').setTransform(DPR, 0, 0, DPR, 0, 0);
     }
 
-    // Fit the painting to "contain" — the WHOLE tree is always visible, top to
-    // bottom, never cropped. It's scaled as large as the viewport allows. The
-    // page background is matched to the painting's paper tone (see setPaperBg)
-    // so any leftover margin blends in and the art appears to fill the screen.
+    // Fit the painting to "cover" — the artwork fills the whole viewport with no
+    // empty/grey margins. Any overflow is cropped (centred), so only the artwork
+    // area is shown.
     if (img && img.width) {
-      const scale = Math.min(viewW / img.width, viewH / img.height);
+      const scale = Math.max(viewW / img.width, viewH / img.height);
       fit.w = img.width * scale;
       fit.h = img.height * scale;
       fit.x = (viewW - fit.w) / 2;
